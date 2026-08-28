@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mood / Phase Tracker</title>
+
+<!-- PWA: манифест -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a1a1a">
+
+<!-- PWA: поддержка iOS Safari (манифест поддерживается частично, поэтому дублируем мета-тегами) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mood Tracker">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+
+<!-- Регистрация service worker'а -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: #1a1a1a;
+    font-family: 'Inter', sans-serif;
+  }
+
+  /* Фиксированный размер контейнера — макет выглядит одинаково на любом телефоне,
+     не тянется под ширину/высоту экрана */
+  .container {
+    width: 100%;
+    height: 100vh;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    align-items: center;
+    padding: calc(10px + env(safe-area-inset-top)) 20px calc(10px + env(safe-area-inset-bottom));
+    overflow: hidden;
+    position: relative;
+
+    /* Фон-паттерн: seamless-текстура, своя на каждое животное.
+       Подставляется скриптом внизу страницы (images/bg-pattern-<animal>.png),
+       замощается (repeat), а не растягивается — поэтому важно, чтобы файл был бесшовным. */
+    background-repeat: repeat;
+    background-position: top left;
+    background-color: #cfcfcf; /* фолбэк-цвет, если картинки нет */
+  }
+
+  /* ===== CALENDAR ROW ===== */
+  .calendar {
+    width: 100%;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(3px);
+    overflow: hidden;
+  }
+
+  .day {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .day .avatar-wrap {
+    position: relative;
+    width: 38.57px;
+    height: 38.57px;
+  }
+
+  .day .avatar-wrap .avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.5);
+    background-size: cover;
+    background-position: center;
+    overflow: hidden;
+  }
+
+  /* декоративная дуга/иконка поверх аватара дня */
+  .day .avatar-wrap svg {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
+  .day .day-label {
+    font-size: 8px;
+    font-weight: 700;
+    color: rgba(0, 0, 0, 0.2);
+    letter-spacing: 0.02em;
+  }
+
+  /* ===== MAIN AVATAR ===== */
+  .avatar-current {
+    width: 350px;
+    height: 350px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    align-self: center;
+
+    /* Картинка животного (mouse.png / goose.png / capybara.png) подставляется скриптом внизу страницы */
+    background-size: cover;
+    background-position: center;
+    background-color: #b8b8b8; /* фолбэк-цвет, пока JS не отработал / картинки нет */
+
+    box-shadow:
+      inset -10px -10px 10px rgba(0, 0, 0, 0.05),
+      inset 10px 10px 10px rgba(255, 255, 255, 0.25);
+  }
+
+  /* ===== PHASE BAR ===== */
+  .phase {
+    width: 100%;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 1px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(3px);
+    overflow: hidden;
+  }
+
+  .phase .segment {
+    flex: 1 1 0;
+    height: 30px;
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .phase .segment.active {
+    background: rgba(0, 0, 0, 0.2);
+  }
+</style>
+</head>
+<body>
+
+  <div class="container">
+
+    <!-- CALENDAR -->
+    <div class="calendar">
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-mon.png')"></div>
+          <svg width="25" height="18" viewBox="0 0 25 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19.6833 17.4999H16.8755C16.3459 17.4999 15.846 17.2548 15.5217 16.8361C15.0436 16.2188 15.0436 15.3562 15.5217 14.7389C15.846 14.3202 16.3459 14.0751 16.8755 14.0751H22.131C22.474 14.0751 22.8023 13.936 23.0408 13.6896C23.5546 13.159 23.5071 12.303 22.9377 11.8325L22.336 11.3353M22.336 11.3353C23.9939 8.93801 25.9835 3.59538 20.6781 1.40354C16.699 -0.240349 11.8358 0.946902 10.7305 2.08849M22.336 11.3353H14.7095M10.7305 2.08849C9.9568 1.06106 7.87886 -0.514329 5.75671 1.40354C5.27429 1.88602 4.62305 3.01424 4.76196 4.50092M10.7305 2.08849C11.3937 3.23007 12.1232 5.85572 9.73575 7.22563M5.42512 6.54067C5.01768 5.81179 4.82025 5.12479 4.76196 4.50092M2.25741 11.3353C1.10162 11.3353 0.199476 10.3439 0.594348 9.25769C0.601791 9.23721 0.60933 9.21669 0.616968 9.19612C1.23003 7.54535 2.47658 5.59836 4.76196 4.50092M14.7095 11.3353C13.6042 10.5362 12.3221 8.32155 16.0359 5.85572M14.7095 11.3353H2.25741M2.25741 11.3353C1.10245 11.3353 0.20334 10.3099 0.616968 9.19612" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="4.11975" cy="8.49991" r="1" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">MO</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-tue.png')"></div>
+          <svg width="19" height="19" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15.6473 3.98097C16.5011 4.12385 17.1271 4.06402 17.5729 3.91721C18.1769 3.71824 17.892 3.09375 17.3209 2.81377C16.8592 2.58735 16.4275 2.23961 16.2586 1.73067C15.9326 0.748716 14.6287 0.503229 14.0174 0.503229C11.2755 0.350273 11.8365 5.68672 12.2942 8.3894C12.4156 9.10672 11.7717 9.77017 11.0449 9.80243C7.40657 9.96391 3.72881 12.8287 3.01562 13.1867C2.36366 13.5141 1.38572 13.3231 0.97825 13.1867C-0.049194 12.6279 0.78542 13.8304 1.54279 14.7957C2.10115 15.5074 2.73985 16.1605 3.48738 16.6698C8.14765 19.8452 12.5189 18.1985 14.2212 16.8691C17.481 14.4142 16.4623 10.3227 15.8511 9.50443C15.2399 8.68614 13.2025 3.57182 15.6473 3.98097ZM3.01562 13.1867C4.91716 15.1643 9.53519 17.8101 12.795 12.573M15.6473 3.98097C15.4843 3.16267 15.9869 2.27619 16.2586 1.93524" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="13.9997" cy="2.00001" r="0.5" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">TU</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-wed.png')"></div>
+          <svg width="25" height="18" viewBox="0 0 25 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19.6833 17.4999H16.8755C16.3459 17.4999 15.846 17.2548 15.5217 16.8361C15.0436 16.2188 15.0436 15.3562 15.5217 14.7389C15.846 14.3202 16.3459 14.0751 16.8755 14.0751H22.131C22.474 14.0751 22.8023 13.936 23.0408 13.6896C23.5546 13.159 23.5071 12.303 22.9377 11.8325L22.336 11.3353M22.336 11.3353C23.9939 8.93801 25.9835 3.59538 20.6781 1.40354C16.699 -0.240349 11.8358 0.946902 10.7305 2.08849M22.336 11.3353H14.7095M10.7305 2.08849C9.9568 1.06106 7.87886 -0.514329 5.75671 1.40354C5.27429 1.88602 4.62305 3.01424 4.76196 4.50092M10.7305 2.08849C11.3937 3.23007 12.1232 5.85572 9.73575 7.22563M5.42512 6.54067C5.01768 5.81179 4.82025 5.12479 4.76196 4.50092M2.25741 11.3353C1.10162 11.3353 0.199476 10.3439 0.594348 9.25769C0.601791 9.23721 0.60933 9.21669 0.616968 9.19612C1.23003 7.54535 2.47658 5.59836 4.76196 4.50092M14.7095 11.3353C13.6042 10.5362 12.3221 8.32155 16.0359 5.85572M14.7095 11.3353H2.25741M2.25741 11.3353C1.10245 11.3353 0.20334 10.3099 0.616968 9.19612" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="4.11975" cy="8.49991" r="1" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">WE</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-thu.png')"></div>
+          <svg width="19" height="19" viewBox="0 0 19 19" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M15.6473 3.98097C16.5011 4.12385 17.1271 4.06402 17.5729 3.91721C18.1769 3.71824 17.892 3.09375 17.3209 2.81377C16.8592 2.58735 16.4275 2.23961 16.2586 1.73067C15.9326 0.748716 14.6287 0.503229 14.0174 0.503229C11.2755 0.350273 11.8365 5.68672 12.2942 8.3894C12.4156 9.10672 11.7717 9.77017 11.0449 9.80243C7.40657 9.96391 3.72881 12.8287 3.01562 13.1867C2.36366 13.5141 1.38572 13.3231 0.97825 13.1867C-0.049194 12.6279 0.78542 13.8304 1.54279 14.7957C2.10115 15.5074 2.73985 16.1605 3.48738 16.6698C8.14765 19.8452 12.5189 18.1985 14.2212 16.8691C17.481 14.4142 16.4623 10.3227 15.8511 9.50443C15.2399 8.68614 13.2025 3.57182 15.6473 3.98097ZM3.01562 13.1867C4.91716 15.1643 9.53519 17.8101 12.795 12.573M15.6473 3.98097C15.4843 3.16267 15.9869 2.27619 16.2586 1.93524" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="13.9997" cy="2.00001" r="0.5" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">TH</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-fri.png')"></div>
+          <svg width="25" height="18" viewBox="0 0 25 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19.6833 17.4999H16.8755C16.3459 17.4999 15.846 17.2548 15.5217 16.8361C15.0436 16.2188 15.0436 15.3562 15.5217 14.7389C15.846 14.3202 16.3459 14.0751 16.8755 14.0751H22.131C22.474 14.0751 22.8023 13.936 23.0408 13.6896C23.5546 13.159 23.5071 12.303 22.9377 11.8325L22.336 11.3353M22.336 11.3353C23.9939 8.93801 25.9835 3.59538 20.6781 1.40354C16.699 -0.240349 11.8358 0.946902 10.7305 2.08849M22.336 11.3353H14.7095M10.7305 2.08849C9.9568 1.06106 7.87886 -0.514329 5.75671 1.40354C5.27429 1.88602 4.62305 3.01424 4.76196 4.50092M10.7305 2.08849C11.3937 3.23007 12.1232 5.85572 9.73575 7.22563M5.42512 6.54067C5.01768 5.81179 4.82025 5.12479 4.76196 4.50092M2.25741 11.3353C1.10162 11.3353 0.199476 10.3439 0.594348 9.25769C0.601791 9.23721 0.60933 9.21669 0.616968 9.19612C1.23003 7.54535 2.47658 5.59836 4.76196 4.50092M14.7095 11.3353C13.6042 10.5362 12.3221 8.32155 16.0359 5.85572M14.7095 11.3353H2.25741M2.25741 11.3353C1.10245 11.3353 0.20334 10.3099 0.616968 9.19612" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="4.11975" cy="8.49991" r="1" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">FR</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-sat.png')"></div>
+          <svg width="21" height="16" viewBox="0 0 21 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10.5541 11.7987L11.1949 14.7621C11.2634 15.079 11.5438 15.3052 11.868 15.3052H12.5094C13.0783 15.3052 13.2583 14.5376 12.7487 14.2847C12.5655 14.1938 12.4496 14.007 12.4496 13.8025V13.1287C12.4496 13.0665 12.4581 13.0046 12.4747 12.9446C12.6662 12.2559 13.6511 12.2806 13.8078 12.978L13.997 13.82C14.0897 14.2327 14.4562 14.526 14.8792 14.526H15.446C15.6755 14.526 15.8616 14.3399 15.8616 14.1104C15.8616 14.0021 15.8193 13.8981 15.7438 13.8206L15.5762 13.6483C15.3945 13.4616 15.2929 13.2114 15.2929 12.9509V10.0455L16.6198 7.9026M5.19364 11.4091L6.95265 11.9935C7.71086 12.3052 9.66956 11.9935 10.5541 11.7987M10.5541 11.7987L10.3646 10.8247M6.95265 11.9935C6.95265 11.9935 6.70153 12.6129 6.87096 13.1614C6.91228 13.2952 7.00996 13.4013 7.12086 13.4868L7.50739 13.7847C7.63568 13.8836 7.71084 14.0365 7.71084 14.1984C7.71084 14.4869 7.47698 14.7208 7.1885 14.7208H6.63042C6.24774 14.7208 5.89862 14.5024 5.7312 14.1583L4.67801 11.9935M4.67801 11.9935L3.73025 12.7727V13.6577C3.73025 13.9596 3.87029 14.2443 4.10935 14.4286L4.285 14.564C4.4133 14.6628 4.48846 14.8157 4.48846 14.9777C4.48846 15.2661 4.2546 15.5 3.96612 15.5H3.44363C3.04272 15.5 2.68056 15.2606 2.52353 14.8917L1.63414 12.8025C1.52074 12.5361 1.52836 12.2336 1.65502 11.9733L1.7654 11.7464C1.92506 11.4182 1.89014 11.0318 1.70227 10.719C0.737277 9.11193 -0.314173 6.21495 1.45563 4.3961C3.9198 1.86364 7.14217 1.08442 10.9332 3.22727C10.9332 3.22727 12.0705 3.42208 12.6392 2.64286M5.81531 9.85065C5.72679 10.4874 5.46178 11.0224 5.19364 11.4091C5.00238 11.6849 4.80953 11.8854 4.67801 11.9935M12.6392 2.64286C12.4496 2.18831 12.2601 1.24026 13.0183 1.08442C13.7765 0.928571 14.0924 1.40909 14.1556 1.66883M12.6392 2.64286L13.0183 3.22727M14.1556 1.66883L14.3451 2.44805M16.4302 1.90411C15.8562 1.78794 15.2868 1.72223 14.8053 1.69124C14.5629 1.67563 14.3427 1.66883 14.1556 1.66883M16.6198 7.9026C17.8959 7.9026 18.96 7.46655 19.4151 7.24683C19.5732 7.17053 19.699 7.04269 19.784 6.88912C20.9581 4.76742 20.6389 4.4933 19.1838 3.22727C18.5198 2.64955 17.5244 2.12554 16.4302 1.90411M16.6198 7.9026C15.6088 7.77273 13.5869 7.2013 13.5869 5.95455M14.8053 1.69124C14.7783 1.29416 14.8759 0.5 15.4825 0.5C16.8185 0.5 16.367 1.43607 16.4302 1.90411" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="16.9998" cy="4" r="0.5" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">SA</span>
+      </div>
+
+      <div class="day">
+        <div class="avatar-wrap">
+          <div class="avatar-img" style="background-image:url('images/day-sun.png')"></div>
+          <svg width="21" height="16" viewBox="0 0 21 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10.5541 11.7987L11.1949 14.7621C11.2634 15.079 11.5438 15.3052 11.868 15.3052H12.5094C13.0783 15.3052 13.2583 14.5376 12.7487 14.2847C12.5655 14.1938 12.4496 14.007 12.4496 13.8025V13.1287C12.4496 13.0665 12.4581 13.0046 12.4747 12.9446C12.6662 12.2559 13.6511 12.2806 13.8078 12.978L13.997 13.82C14.0897 14.2327 14.4562 14.526 14.8792 14.526H15.446C15.6755 14.526 15.8616 14.3399 15.8616 14.1104C15.8616 14.0021 15.8193 13.8981 15.7438 13.8206L15.5762 13.6483C15.3945 13.4616 15.2929 13.2114 15.2929 12.9509V10.0455L16.6198 7.9026M5.19364 11.4091L6.95265 11.9935C7.71086 12.3052 9.66956 11.9935 10.5541 11.7987M10.5541 11.7987L10.3646 10.8247M6.95265 11.9935C6.95265 11.9935 6.70153 12.6129 6.87096 13.1614C6.91228 13.2952 7.00996 13.4013 7.12086 13.4868L7.50739 13.7847C7.63568 13.8836 7.71084 14.0365 7.71084 14.1984C7.71084 14.4869 7.47698 14.7208 7.1885 14.7208H6.63042C6.24774 14.7208 5.89862 14.5024 5.7312 14.1583L4.67801 11.9935M4.67801 11.9935L3.73025 12.7727V13.6577C3.73025 13.9596 3.87029 14.2443 4.10935 14.4286L4.285 14.564C4.4133 14.6628 4.48846 14.8157 4.48846 14.9777C4.48846 15.2661 4.2546 15.5 3.96612 15.5H3.44363C3.04272 15.5 2.68056 15.2606 2.52353 14.8917L1.63414 12.8025C1.52074 12.5361 1.52836 12.2336 1.65502 11.9733L1.7654 11.7464C1.92506 11.4182 1.89014 11.0318 1.70227 10.719C0.737277 9.11193 -0.314173 6.21495 1.45563 4.3961C3.9198 1.86364 7.14217 1.08442 10.9332 3.22727C10.9332 3.22727 12.0705 3.42208 12.6392 2.64286M5.81531 9.85065C5.72679 10.4874 5.46178 11.0224 5.19364 11.4091C5.00238 11.6849 4.80953 11.8854 4.67801 11.9935M12.6392 2.64286C12.4496 2.18831 12.2601 1.24026 13.0183 1.08442C13.7765 0.928571 14.0924 1.40909 14.1556 1.66883M12.6392 2.64286L13.0183 3.22727M14.1556 1.66883L14.3451 2.44805M16.4302 1.90411C15.8562 1.78794 15.2868 1.72223 14.8053 1.69124C14.5629 1.67563 14.3427 1.66883 14.1556 1.66883M16.6198 7.9026C17.8959 7.9026 18.96 7.46655 19.4151 7.24683C19.5732 7.17053 19.699 7.04269 19.784 6.88912C20.9581 4.76742 20.6389 4.4933 19.1838 3.22727C18.5198 2.64955 17.5244 2.12554 16.4302 1.90411M16.6198 7.9026C15.6088 7.77273 13.5869 7.2013 13.5869 5.95455M14.8053 1.69124C14.7783 1.29416 14.8759 0.5 15.4825 0.5C16.8185 0.5 16.367 1.43607 16.4302 1.90411" stroke="black" stroke-opacity="0.3" stroke-linecap="round"/>
+            <circle cx="16.9998" cy="4" r="0.5" fill="black" fill-opacity="0.3"/>
+          </svg>
+        </div>
+        <span class="day-label">SU</span>
+      </div>
+    </div>
+
+    <!-- MAIN AVATAR -->
+    <div class="avatar-current" id="avatarCurrent"></div>
+
+    <!-- PHASE BAR -->
+    <div class="phase">
+      <div class="segment active"></div>
+      <div class="segment"></div>
+      <div class="segment"></div>
+      <div class="segment"></div>
+    </div>
+
+  </div>
+
+  <script>
+    // ===== Питомец дня =====
+    // Раскладка "едет" по неделям: на нечётных ISO-неделях действует PATTERN_A,
+    // на чётных — PATTERN_B. Индекс 0 = понедельник, 6 = воскресенье.
+    // Файлы животных лежат в images/: mouse.png, goose.png, capybara.png
+
+    const PATTERN_A = ['mouse', 'goose', 'mouse', 'goose', 'mouse', 'capybara', 'mouse'];   // Пн Вт Ср Чт Пт Сб Вс
+    const PATTERN_B = ['goose', 'mouse', 'goose', 'mouse', 'goose', 'capybara', 'capybara']; // Пн Вт Ср Чт Пт Сб Вс
+
+    function getISOWeekNumber(date) {
+      const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+      const dayNum = d.getUTCDay() || 7; // Пн=1 ... Вс=7
+      d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+      const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+      return Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+    }
+
+    function getTodaysAnimal() {
+      const now = new Date();
+      const weekNumber = getISOWeekNumber(now);
+      const pattern = (weekNumber % 2 === 1) ? PATTERN_A : PATTERN_B;
+
+      const jsDay = now.getDay(); // 0 = Вс, 1 = Пн, ..., 6 = Сб
+      const dayIndex = jsDay === 0 ? 6 : jsDay - 1; // переводим в 0 = Пн ... 6 = Вс
+
+      return pattern[dayIndex];
+    }
+
+    const animal = getTodaysAnimal();
+    document.getElementById('avatarCurrent').style.backgroundImage = `url('images/${animal}.png')`;
+
+    // Фон-паттерн под животное дня: images/bg-pattern-mouse.png / bg-pattern-goose.png / bg-pattern-capybara.png
+    document.querySelector('.container').style.backgroundImage = `url('images/bg-pattern-${animal}.png')`;
+  </script>
+
+</body>
+</html>
