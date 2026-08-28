@@ -271,10 +271,18 @@
 
     function getTodaysAnimal() {
       const now = new Date();
-      const weekNumber = getISOWeekNumber(now);
+
+      // Смена животного происходит в 12:00, а не в полночь.
+      // Поэтому после полудня считаем "эффективным днём" уже следующий календарный день.
+      const effectiveDate = new Date(now);
+      if (now.getHours() >= 12) {
+        effectiveDate.setDate(effectiveDate.getDate() + 1);
+      }
+
+      const weekNumber = getISOWeekNumber(effectiveDate);
       const pattern = (weekNumber % 2 === 1) ? PATTERN_A : PATTERN_B;
 
-      const jsDay = now.getDay(); // 0 = Вс, 1 = Пн, ..., 6 = Сб
+      const jsDay = effectiveDate.getDay(); // 0 = Вс, 1 = Пн, ..., 6 = Сб
       const dayIndex = jsDay === 0 ? 6 : jsDay - 1; // переводим в 0 = Пн ... 6 = Вс
 
       return pattern[dayIndex];
